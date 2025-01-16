@@ -331,7 +331,7 @@ void LoadConfig()
         if (p[0] == "SYSTEM" && p[1] == "TIME")
         {
             std::string rtime = p[2];
-            stockreadTime = stoi(rtime) * 1000 * 60;
+            stockreadTime = stoi(rtime);// *1000 * 60;
         }
         else if (p[0] == "STOCK")
         {
@@ -604,12 +604,12 @@ void CreateContextMenu(HWND hwnd, POINT pt)
 {
     HMENU hMenu = CreatePopupMenu();
 
-    AppendMenu(hMenu, MF_STRING, IDM_COPY, L"강제 읽기");
+    AppendMenu(hMenu, MF_STRING, IDM_COPY, L"Force Update");
     AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenu(hMenu, MF_STRING, IDM_OPTION1, L"옵션 1");
     AppendMenu(hMenu, MF_STRING, IDM_OPTION2, L"옵션 2");
     AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
-    AppendMenu(hMenu, MF_STRING, IDM_CLOSE, L"닫기");
+    AppendMenu(hMenu, MF_STRING, IDM_CLOSE, L"종료");
 
     SetMenuDefaultItem(hMenu, IDM_COPY, FALSE);
 
@@ -624,7 +624,7 @@ void CreateTrayContextMenu(HWND hwnd, POINT pt)
 {
     HMENU hMenu = CreatePopupMenu();
 
-    AppendMenu(hMenu, MF_STRING, IDM_COPY, L"강제 읽기");
+    AppendMenu(hMenu, MF_STRING, IDM_COPY, L"Force Update");
     AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenu(hMenu, MF_STRING, IDM_OPTION1, L"옵션 1");
     AppendMenu(hMenu, MF_STRING, IDM_OPTION2, L"옵션 2");
