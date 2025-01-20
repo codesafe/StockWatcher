@@ -24,6 +24,7 @@ LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 void PositionWindowAboveTaskbar(HWND hwnd);
 void CreateContextMenu(HWND hwnd, POINT pt);
 void CreateTrayContextMenu(HWND hwnd, POINT pt);
+void DisplayStock(HDC hdc, HWND hwnd, HDC g_hdcMem);
 
 // 메뉴 항목 ID
 #define IDM_CLOSE    1001
@@ -35,17 +36,26 @@ void CreateTrayContextMenu(HWND hwnd, POINT pt);
 #define WM_TRAYICON  (WM_USER + 1)
 
 const wchar_t* g_appname = L"StockWatcher";
-
-// 전역 변수
-//const wchar_t* g_windowText = L"유한양행 : ";
 const int WINDOW_WIDTH = 200;
 const int WINDOW_HEIGHT = 30;
 const int SCROLL_TIMER_ID = 3;
-const int SCROLL_SPEED = 40;    // 스크롤 타이머 간격 (ms)
-const int TRACKING_TIMER_ID = 4;
-const int TRACKING_SPEED = 1000 * 60;
+const int SCROLL_SPEED = 50;    // 스크롤 타이머 간격 (ms)
 
-int g_scrollX = 0;             // 스크롤 위치
+
+enum SCROLLTYPE
+{
+    LR_SIDE,
+    UPDOWN
+};
+
+SCROLLTYPE g_scrollType = SCROLLTYPE::UPDOWN;
+
+int g_waitcount = 0;
+int g_scrollX = 0;
+int g_scrollY = 0;
+int g_currentStock = 0;
+
+HFONT hFont;
 HDC g_hdcMem = NULL;           // 더블 버퍼링용
 HBITMAP g_hbmMem = NULL;
 HGDIOBJ g_hbmOld = NULL;
@@ -57,11 +67,25 @@ std::wstring stockvalue = L"";
 CurlSession curl;
 std::string readBuffer;
 
+enum RISE
+{
+    RISE_NONE,
+    RISE_UP,
+    RISE_DOWN,
+};
+
 struct STOCKINFO
 {
     std::string name;
     std::string code;
     std::string value;
+    RISE rise;
+
+    STOCKINFO()
+    {
+        value = "?????";
+        rise = RISE::RISE_NONE;
+    }
 };
 
 std::vector<STOCKINFO> stocklist;
@@ -119,70 +143,8 @@ std::vector<std::string> SplitLines(const std::string& text)
     return lines;
 }
 
-bool FindSequentialStrings(const std::vector<std::string>& lines, int& startIndex, bool up)
+bool FindSequentialStrings(const std::vector<std::string>& lines, int& startIndex, bool& up)
 {
-#if 0
-    const std::vector<std::string> targetStrings1 = 
-    {
-        "<div class=\"today\">",
-        "<p class=\"no_today\">",
-        "<em class=\"no_up\">"
-    };
-
-    const std::vector<std::string> targetStrings2 =
-    {
-        "<div class=\"today\">",
-        "<p class=\"no_today\">",
-        "<em class=\"no_down\">"
-    };
-
-    for (size_t i = 0; i < lines.size(); ++i) 
-    {
-        bool found = true;
-
-        if (up)
-        {
-            if (i + targetStrings1.size() > lines.size())
-            {
-                return false;
-            }
-
-            // 순차적으로 문자열 비교
-            for (size_t j = 0; j < targetStrings1.size(); ++j)
-            {
-                if (lines[i + j].find(targetStrings1[j]) == std::string::npos)
-                {
-                    found = false;
-                    break;
-                }
-            }
-        }
-        else
-        {
-            if (i + targetStrings2.size() > lines.size())
-            {
-                return false;
-            }
-
-            // 순차적으로 문자열 비교
-            for (size_t j = 0; j < targetStrings2.size(); ++j)
-            {
-                if (lines[i + j].find(targetStrings2[j]) == std::string::npos)
-                {
-                    found = false;
-                    break;
-                }
-            }
-        }
-
-
-        if (found) {
-            startIndex = i;
-            return true;
-        }
-    }
-#else
-
     const std::vector<std::string> targetStrings =
     {
         "<div class=\"today\">",
@@ -217,11 +179,15 @@ bool FindSequentialStrings(const std::vector<std::string>& lines, int& startInde
             if (lines[i + 2].find(updown[0]) == std::string::npos && lines[i + 2].find(updown[1]) == std::string::npos)
                 return false;
 
+            if (lines[i + 2].find(updown[0]) == std::string::npos)
+                up = false;
+            else
+                up = true;
+
             startIndex = i;
             return true;
         }
     }
-#endif
 
     return false;
 }
@@ -269,36 +235,64 @@ std::vector<std::string> ReadLines(const std::string& filename)
     return lines;
 }
 
+bool ValidCheckTime()
+{
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    // st.wHour   : 시간 (24시간제)
+    // st.wMinute : 분
+    // st.wSecond : 초
+
+    // 형식 맞추기 (03:33:11 형태로)
+    //wchar_t timeStr[9];
+    //swprintf(timeStr, 9, L"%02d:%02d:%02d", st.wHour, st.wMinute, st.wSecond);
+
+    if (st.wHour >= 9 && st.wDayOfWeek != 0 && st.wDayOfWeek != 6)
+    {
+        if(st.wHour >= 15 && st.wMinute < 30)
+            return false;
+        else
+            return true;
+    }
+
+
+    return false;
+}
+
 
 void CheckStock(void* ignored)
 {
     while (1)
     {
-        readcount++;
-
-        for (STOCKINFO& s : stocklist)
+        if (ValidCheckTime())
         {
-            //std::string url = "https://finance.naver.com/item/main.naver?code=000100";
-            std::string url = "https://finance.naver.com/item/main.naver?code=" + s.code;
-            std::string response;
-            bool ret = curl.PerformGet(url, response);
-            if (ret)
+            readcount++;
+            for (STOCKINFO& s : stocklist)
             {
-                std::vector<std::string> sss = SplitLines(response);
-
-                int find = 0;
-                bool ret = FindSequentialStrings(sss, find, true);
-
-                //if( ret == false)
-                //    ret = FindSequentialStrings(sss, find, false);
-
-                if (ret == true)
+                //std::string url = "https://finance.naver.com/item/main.naver?code=000100";
+                std::string url = "https://finance.naver.com/item/main.naver?code=" + s.code;
+                std::string response;
+                bool ret = curl.PerformGet(url, response);
+                if (ret)
                 {
-                    std::string msg = ExtractNumber(sss[find + 3]);
-                    EnterCriticalSection(&cs);
-                    //stockvalue.assign(msg.begin(), msg.end());
-                    s.value = msg;
-                    LeaveCriticalSection(&cs);
+                    std::vector<std::string> sss = SplitLines(response);
+
+                    int find = 0;
+                    bool updown = false;
+                    bool ret = FindSequentialStrings(sss, find, updown);
+
+                    //if( ret == false)
+                    //    ret = FindSequentialStrings(sss, find, false);
+
+                    if (ret == true)
+                    {
+                        std::string msg = ExtractNumber(sss[find + 3]);
+                        EnterCriticalSection(&cs);
+                        //stockvalue.assign(msg.begin(), msg.end());
+                        s.value = msg;
+                        s.rise = updown ? RISE::RISE_UP : RISE::RISE_DOWN;
+                        LeaveCriticalSection(&cs);
+                    }
                 }
             }
         }
@@ -410,12 +404,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    static HFONT hFont;
     HDC hdc;
     PAINTSTRUCT ps;
     RECT rect;
     POINT pt;
-    SIZE textSize;
 
     switch (message)
     {
@@ -432,7 +424,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 
         // 스크롤 타이머 시작
         SetTimer(hwnd, SCROLL_TIMER_ID, SCROLL_SPEED, NULL);
-        //SetTimer(hwnd, TRACKING_TIMER_ID, TRACKING_SPEED, NULL);
 
         // 트레이 아이콘 설정
         g_nid.cbSize = sizeof(NOTIFYICONDATA);
@@ -465,6 +456,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 
     case WM_PAINT:
     {
+        SIZE textSize;
         hdc = BeginPaint(hwnd, &ps);
         GetClientRect(hwnd, &rect);
 
@@ -478,21 +470,26 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
         SetTextColor(g_hdcMem, RGB(255, 255, 255));
         SelectObject(g_hdcMem, hFont);
 
-        EnterCriticalSection(&cs);
-        std::wstring lastv = L"";// = std::wstring(g_windowText) + stockvalue;
-        for (STOCKINFO s : stocklist)
-            lastv += StringToWString(s.name) + std::wstring(L" : ") + StringToWString(s.value) + std::wstring(L"  ");
+        if (g_scrollType == SCROLLTYPE::LR_SIDE)
+        {
+            EnterCriticalSection(&cs);
+            std::wstring lastv = L"";// = std::wstring(g_windowText) + stockvalue;
+            for (STOCKINFO s : stocklist)
+                lastv += StringToWString(s.name) + std::wstring(L" : ") + StringToWString(s.value) + std::wstring(L"  ");
 
-        lastv += std::wstring(L"    (") + std::to_wstring(readcount) + std::wstring(L")");
-        
+            lastv += std::wstring(L"    (") + std::to_wstring(readcount) + std::wstring(L")");
+            LeaveCriticalSection(&cs);
 
-        LeaveCriticalSection(&cs);
-
-        // 텍스트 크기 계산
-        GetTextExtentPoint32(g_hdcMem, lastv.c_str(), wcslen(lastv.c_str()), &textSize);
-
-        // 스크롤
-        TextOut(g_hdcMem, WINDOW_WIDTH - g_scrollX, (WINDOW_HEIGHT - textSize.cy) / 2, lastv.c_str(), wcslen(lastv.c_str()));
+            // 텍스트 크기 계산
+            GetTextExtentPoint32(g_hdcMem, lastv.c_str(), wcslen(lastv.c_str()), &textSize);
+            // 스크롤
+            TextOut(g_hdcMem, WINDOW_WIDTH - g_scrollX, (WINDOW_HEIGHT - textSize.cy) / 2, lastv.c_str(), wcslen(lastv.c_str()));
+        }
+        else
+        {
+            if(stocklist.size() > 0)
+                DisplayStock(hdc, hwnd, g_hdcMem);
+        }
 
         // 더블 버퍼 복사
         BitBlt(hdc, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, g_hdcMem, 0, 0, SRCCOPY);
@@ -545,30 +542,54 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_TIMER:
-        if (wParam == SCROLL_TIMER_ID)
+        if (wParam == SCROLL_TIMER_ID && stocklist.empty() == false)
         {
             HDC hdc = GetDC(hwnd);
             SIZE textSize;
             SelectObject(hdc, hFont);
+            
+            STOCKINFO s = stocklist[g_currentStock];
+            std::wstring lastv = StringToWString(s.name) + std::wstring(L" : ") + StringToWString(s.value);
 
-            std::wstring lastv = L"";
-            for (STOCKINFO s : stocklist)
-                lastv += StringToWString(s.name) + L" : " + StringToWString(s.value) + L"  ";
 
+            //std::wstring lastv = L"";
+            //for (STOCKINFO s : stocklist)
+            //    lastv += StringToWString(s.name) + L" : " + StringToWString(s.value) + L"  ";
             GetTextExtentPoint32(hdc, lastv.c_str(), wcslen(lastv.c_str()), &textSize);
             ReleaseDC(hwnd, hdc);
 
-            g_scrollX++;  // 스크롤 속도 조절
-            if (g_scrollX > WINDOW_WIDTH + textSize.cx)
+            if (g_scrollType == SCROLLTYPE::LR_SIDE)
             {
-                g_scrollX = 0;
+                g_scrollX++;  // 스크롤 속도 조절
+                if (g_scrollX > WINDOW_WIDTH + textSize.cx)
+                    g_scrollX = 0;
             }
+            else
+            {
+                if (g_scrollY == (WINDOW_HEIGHT - textSize.cy) / 2 + textSize.cy)
+                {
+                    g_waitcount++;
+                    if (g_waitcount > 50)
+                    {
+                        g_waitcount = 0;
+                        g_scrollY++;
+                    }
+                }
+                else
+                {
+                    g_scrollY++;
+                    if (g_scrollY > WINDOW_HEIGHT + textSize.cy)
+                    {
+                        g_scrollY = 0;
+                        if (g_currentStock >= (int)stocklist.size() - 1)
+                            g_currentStock = 0;
+                        else
+                            g_currentStock++;
+                    }
+                }
+            }
+
             InvalidateRect(hwnd, NULL, FALSE);
-            return 0;
-        }
-        else if (wParam == TRACKING_TIMER_ID)
-        {
-            //GetStock();
         }
         return 0;
 
@@ -604,7 +625,7 @@ void CreateContextMenu(HWND hwnd, POINT pt)
 {
     HMENU hMenu = CreatePopupMenu();
 
-    AppendMenu(hMenu, MF_STRING, IDM_COPY, L"Force Update");
+    AppendMenu(hMenu, MF_STRING, IDM_COPY, L"업데이트");
     AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenu(hMenu, MF_STRING, IDM_OPTION1, L"옵션 1");
     AppendMenu(hMenu, MF_STRING, IDM_OPTION2, L"옵션 2");
@@ -624,7 +645,7 @@ void CreateTrayContextMenu(HWND hwnd, POINT pt)
 {
     HMENU hMenu = CreatePopupMenu();
 
-    AppendMenu(hMenu, MF_STRING, IDM_COPY, L"Force Update");
+    AppendMenu(hMenu, MF_STRING, IDM_COPY, L"업데이트");
     AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenu(hMenu, MF_STRING, IDM_OPTION1, L"옵션 1");
     AppendMenu(hMenu, MF_STRING, IDM_OPTION2, L"옵션 2");
@@ -637,4 +658,43 @@ void CreateTrayContextMenu(HWND hwnd, POINT pt)
         pt.x, pt.y, 0, hwnd, NULL);
 
     DestroyMenu(hMenu);
+}
+
+
+void DisplayStock(HDC hdc, HWND hwnd, HDC g_hdcMem)
+{
+    // △ ▲ ▽ ▼ → ← ↑ ↓
+    const std::wstring u = L"▲";
+    const std::wstring d = L"▼";
+    const std::wstring n = L"△▽";
+
+    SIZE textSize;
+
+    // 텍스트 설정
+    SetBkMode(g_hdcMem, TRANSPARENT);
+    SetTextColor(g_hdcMem, RGB(255, 255, 255));
+    SelectObject(g_hdcMem, hFont);
+
+    STOCKINFO s = stocklist[g_currentStock];
+    std::wstring lastv = StringToWString(s.name) + std::wstring(L" : ") + StringToWString(s.value);
+    GetTextExtentPoint32(g_hdcMem, lastv.c_str(), wcslen(lastv.c_str()), &textSize);
+
+    // 스크롤
+    TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2, WINDOW_HEIGHT - g_scrollY, lastv.c_str(), wcslen(lastv.c_str()));
+
+    if (s.rise == RISE::RISE_UP)
+    {
+        SetTextColor(g_hdcMem, RGB(255, 0, 0));
+        TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2 - 15, WINDOW_HEIGHT - g_scrollY, u.c_str(), 1);
+    }
+    else if (s.rise == RISE::RISE_DOWN)
+    {
+        SetTextColor(g_hdcMem, RGB(0, 0, 255));
+        TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2 - 15, WINDOW_HEIGHT - g_scrollY, d.c_str(), 1);
+    }
+    else
+    {
+        SetTextColor(g_hdcMem, RGB(0, 255, 0));
+        TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2 - 30, WINDOW_HEIGHT - g_scrollY, n.c_str(), 2);
+    }
 }
