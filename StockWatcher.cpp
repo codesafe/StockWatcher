@@ -249,7 +249,7 @@ bool ValidCheckTime()
 
     if (st.wHour >= 9 && st.wDayOfWeek != 0 && st.wDayOfWeek != 6)
     {
-        if(st.wHour >= 15 && st.wMinute < 30)
+        if(st.wHour >= 15 && st.wMinute >= 30)
             return false;
         else
             return true;
@@ -259,17 +259,45 @@ bool ValidCheckTime()
     return false;
 }
 
+bool ParseInfo(std::vector<std::string> lines, STOCKINFO& stock)
+{
+    std::string keyword = "<dd>현재가";
+    for (std::string line : lines)
+    {
+        if (line.find(keyword) != std::string::npos)
+        {
+            std::vector<std::string> sp = SplitString(line, ' ');
+            if (sp[3] == "하락")
+            {
+                stock.value = sp[1] + "  " + "-" +sp[6] + "%";
+                stock.rise = RISE::RISE_DOWN;
+            }
+            else if (sp[3] == "보합")
+            {
+                stock.value = sp[1];
+                stock.rise = RISE::RISE_NONE;
+            }
+            else
+            {
+                stock.value = sp[1] + "  " + "+" + sp[6] + "%";
+                stock.rise = RISE::RISE_UP;
+            }
+            return true;
+        }
+    }
+    return false;
+}
 
 void CheckStock(void* ignored)
 {
+    bool check = false;
     while (1)
     {
-        if (ValidCheckTime())
+        if (ValidCheckTime() || check)
         {
             readcount++;
             for (STOCKINFO& s : stocklist)
             {
-                //std::string url = "https://finance.naver.com/item/main.naver?code=000100";
                 std::string url = "https://finance.naver.com/item/main.naver?code=" + s.code;
                 std::string response;
                 bool ret = curl.PerformGet(url, response);
@@ -279,23 +307,31 @@ void CheckStock(void* ignored)
 
                     int find = 0;
                     bool updown = false;
-                    bool ret = FindSequentialStrings(sss, find, updown);
+                    //bool ret = FindSequentialStrings(sss, find, updown);
 
-                    //if( ret == false)
-                    //    ret = FindSequentialStrings(sss, find, false);
+                    EnterCriticalSection(&cs);
+                    bool ret = ParseInfo(sss, s);
+                    LeaveCriticalSection(&cs);
 
                     if (ret == true)
                     {
-                        std::string msg = ExtractNumber(sss[find + 3]);
-                        EnterCriticalSection(&cs);
-                        //stockvalue.assign(msg.begin(), msg.end());
-                        s.value = msg;
-                        s.rise = updown ? RISE::RISE_UP : RISE::RISE_DOWN;
-                        LeaveCriticalSection(&cs);
+                        //std::string msg = ExtractNumber(sss[find + 3]);
+                        //EnterCriticalSection(&cs);
+                        //s.value = msg;
+                        //s.rise = updown ? RISE::RISE_UP : RISE::RISE_DOWN;
+                        //LeaveCriticalSection(&cs);
                     }
+                }
+                else
+                {
+                    EnterCriticalSection(&cs);
+                    s.value = "?????";
+                    s.rise = RISE::RISE_NONE;
+                    LeaveCriticalSection(&cs);
                 }
             }
         }
+        check = false;
 
         for (int i = 0; i < 60 * stockreadTime; i++)
         {
@@ -303,6 +339,7 @@ void CheckStock(void* ignored)
             if (forceTrack)
             {
                 forceTrack = false;
+                check = true;
                 LeaveCriticalSection(&cs);
                 break;
             }
@@ -516,21 +553,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
             break;
         case IDM_COPY:
             forceTrack = true;
-
-            if (OpenClipboard(hwnd))
-            {
-                //EmptyClipboard();
-                //size_t len = (wcslen(g_windowText) + 1) * sizeof(wchar_t);
-                //HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
-                //if (hMem)
-                //{
-                //    wchar_t* pMem = (wchar_t*)GlobalLock(hMem);
-                //    wcscpy_s(pMem, len / sizeof(wchar_t), g_windowText);
-                //    GlobalUnlock(hMem);
-                //    SetClipboardData(CF_UNICODETEXT, hMem);
-                //}
-                //CloseClipboard();
-            }
             break;
         case IDM_OPTION1:
             MessageBox(hwnd, L"Option 1 selected", L"Menu", MB_OK);
@@ -627,9 +649,9 @@ void CreateContextMenu(HWND hwnd, POINT pt)
 
     AppendMenu(hMenu, MF_STRING, IDM_COPY, L"업데이트");
     AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
-    AppendMenu(hMenu, MF_STRING, IDM_OPTION1, L"옵션 1");
-    AppendMenu(hMenu, MF_STRING, IDM_OPTION2, L"옵션 2");
-    AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
+    //AppendMenu(hMenu, MF_STRING, IDM_OPTION1, L"옵션 1");
+    //AppendMenu(hMenu, MF_STRING, IDM_OPTION2, L"옵션 2");
+    //AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenu(hMenu, MF_STRING, IDM_CLOSE, L"종료");
 
     SetMenuDefaultItem(hMenu, IDM_COPY, FALSE);
@@ -647,9 +669,9 @@ void CreateTrayContextMenu(HWND hwnd, POINT pt)
 
     AppendMenu(hMenu, MF_STRING, IDM_COPY, L"업데이트");
     AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
-    AppendMenu(hMenu, MF_STRING, IDM_OPTION1, L"옵션 1");
-    AppendMenu(hMenu, MF_STRING, IDM_OPTION2, L"옵션 2");
-    AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
+    //AppendMenu(hMenu, MF_STRING, IDM_OPTION1, L"옵션 1");
+    //AppendMenu(hMenu, MF_STRING, IDM_OPTION2, L"옵션 2");
+    //AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenu(hMenu, MF_STRING, IDM_EXIT, L"종료");
 
     SetForegroundWindow(hwnd);
@@ -678,6 +700,7 @@ void DisplayStock(HDC hdc, HWND hwnd, HDC g_hdcMem)
     STOCKINFO s = stocklist[g_currentStock];
     std::wstring lastv = StringToWString(s.name) + std::wstring(L" : ") + StringToWString(s.value);
     GetTextExtentPoint32(g_hdcMem, lastv.c_str(), wcslen(lastv.c_str()), &textSize);
+    textSize.cx -= 15;
 
     // 스크롤
     TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2, WINDOW_HEIGHT - g_scrollY, lastv.c_str(), wcslen(lastv.c_str()));
