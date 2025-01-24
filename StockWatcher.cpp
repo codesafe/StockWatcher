@@ -15,9 +15,20 @@
 #include "Network.h"
 
 #pragma comment (lib, "dwmapi.lib")
+#ifdef _WIN64
+#pragma comment(lib, "wldap32.lib")
+#pragma comment(lib, "Ws2_32.lib")
+#pragma comment(lib, "crypt32.lib")
+#pragma comment(lib, "normaliz.lib")
+
 #pragma comment (lib, "libcurl.lib")
 #pragma comment (lib, "libcrypto.lib")
 #pragma comment (lib, "libssl.lib")
+#else
+#pragma comment (lib, "libcurl.lib")    
+#pragma comment (lib, "libcrypto.lib")
+#pragma comment (lib, "libssl.lib")
+#endif
 
 
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -427,7 +438,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     PositionWindowAboveTaskbar(hwnd);
 
     LoadConfig();
-    curl.Initialize();
+    bool ret = curl.Initialize();
     _beginthread(CheckStock, 0, NULL);
 
 
@@ -649,9 +660,6 @@ void CreateContextMenu(HWND hwnd, POINT pt)
 
     AppendMenu(hMenu, MF_STRING, IDM_COPY, L"업데이트");
     AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
-    //AppendMenu(hMenu, MF_STRING, IDM_OPTION1, L"옵션 1");
-    //AppendMenu(hMenu, MF_STRING, IDM_OPTION2, L"옵션 2");
-    //AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenu(hMenu, MF_STRING, IDM_CLOSE, L"종료");
 
     SetMenuDefaultItem(hMenu, IDM_COPY, FALSE);
@@ -669,9 +677,6 @@ void CreateTrayContextMenu(HWND hwnd, POINT pt)
 
     AppendMenu(hMenu, MF_STRING, IDM_COPY, L"업데이트");
     AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
-    //AppendMenu(hMenu, MF_STRING, IDM_OPTION1, L"옵션 1");
-    //AppendMenu(hMenu, MF_STRING, IDM_OPTION2, L"옵션 2");
-    //AppendMenu(hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenu(hMenu, MF_STRING, IDM_EXIT, L"종료");
 
     SetForegroundWindow(hwnd);
