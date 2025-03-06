@@ -297,7 +297,7 @@ bool ParseInfo(std::vector<std::string> lines, STOCKINFO& stock)
             //return true;
         }
 
-        if (line.find(keyword2) != std::string::npos)
+        if (line.find(keyword2) != std::string::npos && stock.rise != RISE::RISE_NONE)
         {
             std::vector<std::string> sp = SplitString(line, ' ');
             stock.value += sp[0] +"%";
