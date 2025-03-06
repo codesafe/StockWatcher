@@ -273,6 +273,7 @@ bool ValidCheckTime()
 bool ParseInfo(std::vector<std::string> lines, STOCKINFO& stock)
 {
     std::string keyword = "<dd>현재가";
+    std::string keyword2 = "퍼센트";
     for (std::string line : lines)
     {
         if (line.find(keyword) != std::string::npos)
@@ -280,7 +281,7 @@ bool ParseInfo(std::vector<std::string> lines, STOCKINFO& stock)
             std::vector<std::string> sp = SplitString(line, ' ');
             if (sp[3] == "하락")
             {
-                stock.value = sp[1] + "  " + "-" +sp[6] + "%";
+                stock.value = sp[1] + "  " + "-";// +sp[4];// +"%";
                 stock.rise = RISE::RISE_DOWN;
             }
             else if (sp[3] == "보합")
@@ -290,11 +291,19 @@ bool ParseInfo(std::vector<std::string> lines, STOCKINFO& stock)
             }
             else
             {
-                stock.value = sp[1] + "  " + "+" + sp[6] + "%";
+                stock.value = sp[1] + "  " + "+";// +sp[4];// +"%";
                 stock.rise = RISE::RISE_UP;
             }
+            //return true;
+        }
+
+        if (line.find(keyword2) != std::string::npos)
+        {
+            std::vector<std::string> sp = SplitString(line, ' ');
+            stock.value += sp[0] +"%";
             return true;
         }
+
     }
     return false;
 }
