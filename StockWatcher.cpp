@@ -47,10 +47,10 @@ void DisplayStock(HDC hdc, HWND hwnd, HDC g_hdcMem);
 #define WM_TRAYICON  (WM_USER + 1)
 
 const wchar_t* g_appname = L"StockWatcher";
-const int WINDOW_WIDTH = 200;
-const int WINDOW_HEIGHT = 30;
+const int WINDOW_WIDTH = 220;
+const int WINDOW_HEIGHT = 33;
 const int SCROLL_TIMER_ID = 3;
-const int SCROLL_SPEED = 50;    // 스크롤 타이머 간격 (ms)
+const int SCROLL_SPEED = 40;    // 스크롤 타이머 간격 (ms)
 
 
 enum SCROLLTYPE
@@ -78,6 +78,13 @@ std::wstring stockvalue = L"";
 CurlSession curl;
 std::string readBuffer;
 
+
+enum MARKET
+{
+    KRX,    // 9 ~ 3:30
+    NXT     //
+};
+
 enum RISE
 {
     RISE_NONE,
@@ -90,20 +97,25 @@ struct STOCKINFO
     std::string name;
     std::string code;
     std::string value;
+    std::string valuenxt;
     RISE rise;
+    RISE risenxt;
 
     STOCKINFO()
     {
         value = "?????";
         rise = RISE::RISE_NONE;
+        risenxt = RISE::RISE_NONE;
     }
 };
 
 std::vector<STOCKINFO> stocklist;
 int stockreadTime = 1000 * 60;  // 1min
 bool forceTrack = false;
-
 int readcount = 0;
+
+MARKET currentMarket = MARKET::KRX;
+
 
 std::wstring StringToWString(const std::string& str) 
 {
@@ -260,7 +272,26 @@ bool ValidCheckTime()
 
     if (st.wHour >= 9 && st.wDayOfWeek != 0 && st.wDayOfWeek != 6)
     {
-        if(st.wHour >= 15 && st.wMinute >= 30)
+        if (st.wHour >= 15)
+        {
+            if (st.wHour == 15 )
+            {
+                if (st.wMinute >= 30)
+                {
+                    currentMarket = MARKET::NXT;
+                }
+                else
+                    currentMarket = MARKET::KRX;
+            }
+            else
+            {
+                currentMarket = MARKET::NXT;
+            }
+        }
+        else
+            currentMarket = MARKET::KRX;
+
+        if(st.wHour >= 21 && st.wMinute >= 00)
             return false;
         else
             return true;
@@ -274,6 +305,10 @@ bool ParseInfo(std::vector<std::string> lines, STOCKINFO& stock)
 {
     std::string keyword = "<dd>현재가";
     std::string keyword2 = "퍼센트";
+    std::string keyword3 = "id=\"rate_info_krx\"";
+    std::string keyword4 = "id=\"rate_info_nxt\"";
+
+#if 0
     for (std::string line : lines)
     {
         if (line.find(keyword) != std::string::npos)
@@ -303,9 +338,110 @@ bool ParseInfo(std::vector<std::string> lines, STOCKINFO& stock)
             stock.value += sp[0] +"%";
             return true;
         }
+    }
+
+#else
+    bool found = false;
+    for (int i=0; i<lines.size(); i++)
+    {
+        std::string line = lines[i];
+        if (line.find(keyword3) != std::string::npos)
+        {
+            std::string line3 = lines[i + 3];
+            std::vector<std::string> sp = SplitString(line3, ' ');
+
+            std::string line5 = lines[i + 5];
+            std::vector<std::string> sp1 = SplitString(line5, ' ');
+
+            size_t pos = sp1[0].find("<dd>");
+            if (pos != std::string::npos)
+                sp1[0].erase(pos, 4);
+
+            if (sp1[1] == "마이너스</dd>")
+            {
+                stock.value = sp[1] + "  " + "-" + sp1[0];// +sp[4];// +"%";
+                stock.rise = RISE::RISE_DOWN;
+            }
+            else if (sp1[1] == "보합")
+            {
+                stock.value = sp[1];
+                stock.rise = RISE::RISE_NONE;
+            }
+            else if (sp1[1] == "플러스</dd>")
+            {
+                stock.value = sp[1] + " " + "+" + sp1[0];// +sp[4];// +"%";
+                stock.rise = RISE::RISE_UP;
+            }
+
+            found = true;
+        }
+
+        if (line.find(keyword4) != std::string::npos)
+        {
+            std::string line3 = lines[i + 3];
+            std::vector<std::string> sp = SplitString(line3, ' ');
+
+            std::string line5 = lines[i + 5];
+            std::vector<std::string> sp1 = SplitString(line5, ' ');
+
+            size_t pos = sp1[0].find("<dd>");
+            if (pos != std::string::npos)
+                sp1[0].erase(pos, 4);
+
+            if (sp1[1] == "마이너스</dd>")
+            {
+                stock.valuenxt = sp[1] + "  " + "-" + sp1[0];// +sp[4];// +"%";
+                stock.risenxt = RISE::RISE_DOWN;
+            }
+            else if (sp1[1] == "보합")
+            {
+                stock.valuenxt = sp[1];
+                stock.risenxt = RISE::RISE_NONE;
+            }
+            else if (sp1[1] == "플러스</dd>")
+            {
+                stock.valuenxt = sp[1] + " " + "+" + sp1[0];// +sp[4];// +"%";
+                stock.risenxt = RISE::RISE_UP;
+            }
+            found = true;
+        }
+
+        /*
+        if (line.find(keyword) != std::string::npos)
+        {
+            std::vector<std::string> sp = SplitString(line, ' ');
+            if (sp[3] == "하락")
+            {
+                stock.value = sp[1] + "  " + "-";// +sp[4];// +"%";
+                stock.rise = RISE::RISE_DOWN;
+            }
+            else if (sp[3] == "보합")
+            {
+                stock.value = sp[1];
+                stock.rise = RISE::RISE_NONE;
+            }
+            else
+            {
+                stock.value = sp[1] + "  " + "+";// +sp[4];// +"%";
+                stock.rise = RISE::RISE_UP;
+            }
+            //return true;
+        }
+
+        if (line.find(keyword2) != std::string::npos && stock.rise != RISE::RISE_NONE)
+        {
+            std::vector<std::string> sp = SplitString(line, ' ');
+            stock.value += sp[0] +"%";
+            return true;
+        }
+        */
 
     }
-    return false;
+
+
+#endif
+
+    return found ? true : false;
 }
 
 void CheckStock(void* ignored)
@@ -319,6 +455,12 @@ void CheckStock(void* ignored)
             for (STOCKINFO& s : stocklist)
             {
                 std::string url = "https://finance.naver.com/item/main.naver?code=" + s.code;
+
+                if (currentMarket == MARKET::KRX)
+                    url += "&stockExchangeType=KRX";
+                else
+                    url += "&stockExchangeType=NXT";
+
                 std::string response;
                 bool ret = curl.PerformGet(url, response);
                 if (ret)
@@ -708,30 +850,61 @@ void DisplayStock(HDC hdc, HWND hwnd, HDC g_hdcMem)
 
     // 텍스트 설정
     SetBkMode(g_hdcMem, TRANSPARENT);
-    SetTextColor(g_hdcMem, RGB(255, 255, 255));
+    SetTextColor(g_hdcMem, currentMarket == MARKET::KRX ? RGB(255, 255, 255) : RGB(255, 255, 0));
     SelectObject(g_hdcMem, hFont);
 
-    STOCKINFO s = stocklist[g_currentStock];
-    std::wstring lastv = StringToWString(s.name) + std::wstring(L" : ") + StringToWString(s.value);
-    GetTextExtentPoint32(g_hdcMem, lastv.c_str(), wcslen(lastv.c_str()), &textSize);
-    textSize.cx -= 15;
-
-    // 스크롤
-    TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2, WINDOW_HEIGHT - g_scrollY, lastv.c_str(), wcslen(lastv.c_str()));
-
-    if (s.rise == RISE::RISE_UP)
+    if (currentMarket == MARKET::KRX)
     {
-        SetTextColor(g_hdcMem, RGB(255, 0, 0));
-        TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2 - 15, WINDOW_HEIGHT - g_scrollY, u.c_str(), 1);
-    }
-    else if (s.rise == RISE::RISE_DOWN)
-    {
-        SetTextColor(g_hdcMem, RGB(0, 0, 255));
-        TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2 - 15, WINDOW_HEIGHT - g_scrollY, d.c_str(), 1);
+        STOCKINFO s = stocklist[g_currentStock];
+        std::wstring lastv = StringToWString(s.name) + std::wstring(L" : ") + StringToWString(s.value);
+        GetTextExtentPoint32(g_hdcMem, lastv.c_str(), wcslen(lastv.c_str()), &textSize);
+        textSize.cx -= 15;
+
+        // 스크롤
+        TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2, WINDOW_HEIGHT - g_scrollY, lastv.c_str(), wcslen(lastv.c_str()));
+
+        if (s.rise == RISE::RISE_UP)
+        {
+            SetTextColor(g_hdcMem, RGB(255, 0, 0));
+            TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2 - 15, WINDOW_HEIGHT - g_scrollY, u.c_str(), 1);
+        }
+        else if (s.rise == RISE::RISE_DOWN)
+        {
+            SetTextColor(g_hdcMem, RGB(0, 0, 255));
+            TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2 - 15, WINDOW_HEIGHT - g_scrollY, d.c_str(), 1);
+        }
+        else
+        {
+            SetTextColor(g_hdcMem, RGB(0, 255, 0));
+            TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2 - 30, WINDOW_HEIGHT - g_scrollY, n.c_str(), 2);
+        }
     }
     else
     {
-        SetTextColor(g_hdcMem, RGB(0, 255, 0));
-        TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2 - 30, WINDOW_HEIGHT - g_scrollY, n.c_str(), 2);
+        STOCKINFO s = stocklist[g_currentStock];
+        std::wstring lastv = StringToWString(s.name) + std::wstring(L" : ") + StringToWString(s.valuenxt);
+        GetTextExtentPoint32(g_hdcMem, lastv.c_str(), wcslen(lastv.c_str()), &textSize);
+        textSize.cx -= 15;
+
+        // 스크롤
+        TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2, WINDOW_HEIGHT - g_scrollY, lastv.c_str(), wcslen(lastv.c_str()));
+
+        if (s.risenxt == RISE::RISE_UP)
+        {
+            SetTextColor(g_hdcMem, RGB(255, 0, 0));
+            TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2 - 15, WINDOW_HEIGHT - g_scrollY, u.c_str(), 1);
+        }
+        else if (s.risenxt == RISE::RISE_DOWN)
+        {
+            SetTextColor(g_hdcMem, RGB(0, 0, 255));
+            TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2 - 15, WINDOW_HEIGHT - g_scrollY, d.c_str(), 1);
+        }
+        else
+        {
+            SetTextColor(g_hdcMem, RGB(0, 255, 0));
+            TextOut(g_hdcMem, (WINDOW_WIDTH - textSize.cx) / 2 - 30, WINDOW_HEIGHT - g_scrollY, n.c_str(), 2);
+        }
+
     }
+
 }
